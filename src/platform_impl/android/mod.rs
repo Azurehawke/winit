@@ -6,7 +6,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use android_activity::input::{InputEvent, KeyAction, Keycode, MotionAction};
+use android_activity::input::{Axis, InputEvent, KeyAction, Keycode, MotionAction};
 use android_activity::{
     AndroidApp, AndroidAppWaker, ConfigurationRef, InputStatus, MainEvent, Rect,
 };
@@ -376,6 +376,24 @@ impl<T: 'static> EventLoop<T> {
             InputEvent::MotionEvent(motion_event) => {
                 let window_id = window::WindowId(WindowId);
                 let device_id = event::DeviceId(DeviceId(motion_event.device_id()));
+
+                if matches!(motion_event.action(), MotionAction::Scroll) {
+                    // A mouse wheel or a scrolling pad reports its scroll as axis values, not as
+                    // touches: pass it on as a wheel event, as the other platforms do.
+                    let x = motion_event.axis_value(Axis::Hscroll);
+                    let y = motion_event.axis_value(Axis::Vscroll);
+                    if x.is_finite() && y.is_finite() && (x != 0.0 || y != 0.0) {
+                        let event = event::Event::WindowEvent {
+                            window_id,
+                            event: event::WindowEvent::MouseWheel {
+                                device_id,
+                                delta: event::MouseScrollDelta::LineDelta(x, y),
+                                phase: event::TouchPhase::Moved,
+                            },
+                        };
+                        callback(event, self.window_target());
+                    }
+                }
 
                 let phase = match motion_event.action() {
                     MotionAction::Down | MotionAction::PointerDown => {
