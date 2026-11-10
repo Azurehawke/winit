@@ -377,24 +377,42 @@ impl<T: 'static> EventLoop<T> {
                 let window_id = window::WindowId(WindowId);
                 let device_id = event::DeviceId(DeviceId(motion_event.device_id()));
 
-                if matches!(motion_event.action(), MotionAction::Scroll) {
-                    // A mouse wheel or a scrolling pad reports its scroll as axis values, not as
-                    // touches: pass it on as a wheel event, as the other platforms do.
-                    // The scroll axes belong to the pointer that moved the wheel (the first one).
-                    let pointer = motion_event.pointer_at_index(motion_event.pointer_index());
-                    let x = pointer.axis_value(Axis::Hscroll);
-                    let y = pointer.axis_value(Axis::Vscroll);
-                    if x.is_finite() && y.is_finite() && (x != 0.0 || y != 0.0) {
-                        let event = event::Event::WindowEvent {
+                // A mouse's pointer is hover motion, and its wheel is an axis value on whichever
+                // action carries it (a scroll, or a hover move). The pointer's place comes first,
+                // because a wheel scrolls what the pointer is over.
+                let pointer = motion_event.pointer_at_index(motion_event.pointer_index());
+                let location = PhysicalPosition { x: pointer.x() as f64, y: pointer.y() as f64 };
+                if matches!(motion_event.action(), MotionAction::HoverMove | MotionAction::HoverEnter) {
+                    callback(
+                        event::Event::WindowEvent {
+                            window_id,
+                            event: event::WindowEvent::CursorMoved { device_id, position: location },
+                        },
+                        self.window_target(),
+                    );
+                }
+                let x = pointer.axis_value(Axis::Hscroll);
+                let y = pointer.axis_value(Axis::Vscroll);
+                if x.is_finite() && y.is_finite() && (x != 0.0 || y != 0.0) {
+                    callback(
+                        event::Event::WindowEvent {
+                            window_id,
+                            event: event::WindowEvent::CursorMoved { device_id, position: location },
+                        },
+                        self.window_target(),
+                    );
+                    callback(
+                        event::Event::WindowEvent {
                             window_id,
                             event: event::WindowEvent::MouseWheel {
                                 device_id,
+                                // A touch-style scroll is never an axis, so this is the wheel alone.
                                 delta: event::MouseScrollDelta::LineDelta(x, y),
                                 phase: event::TouchPhase::Moved,
                             },
-                        };
-                        callback(event, self.window_target());
-                    }
+                        },
+                        self.window_target(),
+                    );
                 }
 
                 let phase = match motion_event.action() {
