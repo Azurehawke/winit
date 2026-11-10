@@ -380,8 +380,10 @@ impl<T: 'static> EventLoop<T> {
                 if matches!(motion_event.action(), MotionAction::Scroll) {
                     // A mouse wheel or a scrolling pad reports its scroll as axis values, not as
                     // touches: pass it on as a wheel event, as the other platforms do.
-                    let x = motion_event.axis_value(Axis::Hscroll);
-                    let y = motion_event.axis_value(Axis::Vscroll);
+                    // The scroll axes belong to the pointer that moved the wheel (the first one).
+                    let pointer = motion_event.pointer_at_index(motion_event.pointer_index());
+                    let x = pointer.axis_value(Axis::Hscroll);
+                    let y = pointer.axis_value(Axis::Vscroll);
                     if x.is_finite() && y.is_finite() && (x != 0.0 || y != 0.0) {
                         let event = event::Event::WindowEvent {
                             window_id,
