@@ -143,6 +143,9 @@ pub struct EventLoop<T: 'static> {
     cause: StartCause,
     ignore_volume_keys: bool,
     combining_accent: Option<char>,
+    // The pointer whose press has started and not yet ended. A trackpad's scroll can leave its
+    // press open, so the next scroll closes it (see below).
+    held_touch: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -192,6 +195,7 @@ impl<T: 'static> EventLoop<T> {
             cause: StartCause::Init,
             ignore_volume_keys: attributes.ignore_volume_keys,
             combining_accent: None,
+            held_touch: None,
         })
     }
 
@@ -394,6 +398,24 @@ impl<T: 'static> EventLoop<T> {
                 let x = pointer.axis_value(Axis::Hscroll);
                 let y = pointer.axis_value(Axis::Vscroll);
                 if x.is_finite() && y.is_finite() && (x != 0.0 || y != 0.0) {
+                    // A trackpad's scroll can arrive while its press is still open (the release
+                    // is only sent with the next click). egui then keeps the pane dragging with the
+                    // pointer, so close that press first.
+                    if let Some(id) = self.held_touch.take() {
+                        callback(
+                            event::Event::WindowEvent {
+                                window_id,
+                                event: event::WindowEvent::Touch(event::Touch {
+                                    device_id,
+                                    phase: event::TouchPhase::Cancelled,
+                                    location,
+                                    id,
+                                    force: None,
+                                }),
+                            },
+                            self.window_target(),
+                        );
+                    }
                     callback(
                         event::Event::WindowEvent {
                             window_id,
@@ -446,13 +468,23 @@ impl<T: 'static> EventLoop<T> {
                             "Input event {device_id:?}, {phase:?}, loc={location:?}, \
                              pointer={pointer:?}"
                         );
+                        let id = pointer.pointer_id() as u64;
+                        match phase {
+                            event::TouchPhase::Started => self.held_touch = Some(id),
+                            event::TouchPhase::Ended | event::TouchPhase::Cancelled
+                                if self.held_touch == Some(id) =>
+                            {
+                                self.held_touch = None
+                            },
+                            _ => {},
+                        }
                         let event = event::Event::WindowEvent {
                             window_id,
                             event: event::WindowEvent::Touch(event::Touch {
                                 device_id,
                                 phase,
                                 location,
-                                id: pointer.pointer_id() as u64,
+                                id,
                                 force: Some(Force::Normalized(pointer.pressure() as f64)),
                             }),
                         };
